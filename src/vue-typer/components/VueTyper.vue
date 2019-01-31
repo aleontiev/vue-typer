@@ -3,7 +3,7 @@
   Ideally we'd just have span.left and span.right contain all the chars to the left and
   right of the caret, but line-wrapping becomes tricky on some browsers (FF/IE/Edge).
   Until we can find a solution for this, we just create one span per character.
-span.vue-typer(v-if='show')
+span.vue-typer
   span.left
     char.custom(v-for='l in numLeftChars'
                 :val="currentTextArray[l-1]"
@@ -51,7 +51,8 @@ const fadeObjectValidator = (value) => {
     (value.key === undefined || !!value.key) &&
     (value.timeout === undefined) &&
     (value.interval === undefined) &&
-    (value.index === undefined)
+    (value.index === undefined) &&
+    (value.len === undefined)
 }
 
 const fadeValidator = (value) => {
@@ -61,9 +62,6 @@ const fadeValidator = (value) => {
   if (typeof value === 'number') {
     return value >= 0
   }
-  if (typeof value === 'object') {
-    return fadeObjectValidator(value)
-  }
   if (typeof value === 'string') {
     return value.match(/^[0-9]+/)
   }
@@ -71,6 +69,9 @@ const fadeValidator = (value) => {
     // todo: check key uniqueness for multiple faders
     // and possible check against using the standard classes
     return value.every(v => fadeObjectValidator(v))
+  }
+  if (typeof value === 'object') {
+    return fadeObjectValidator(value)
   }
   return false
 }
@@ -206,8 +207,7 @@ export default {
       actionInterval: 0,
       fades: [],
       classes: [],
-      keys: [],
-      show: true
+      keys: []
     }
   },
 
@@ -277,6 +277,9 @@ export default {
       this.$watch(['fades', index, 'index'].join('.'), (newVal, oldVal) => {
         this.resetClasses()
       })
+      this.$watch(['fades', index, 'key'].join('.'), (newVal, oldVal) => {
+        this.resetClasses()
+      })
     }
   },
 
@@ -337,28 +340,29 @@ export default {
     initFades() {
       let fades = this.fade
       if (!fades) {
-        fades = []
-      } else if (typeof fades === 'boolean') {
-        fades = [Object.assign(fadeDefault, {})]
+        this.fades = []
+        return
+      }
+      if (typeof fades === 'boolean') {
+        this.fades = [Object.assign({}, fadeDefault)]
       } else if (typeof fades === 'number') {
-        fades = [Object.assign(fadeDefault, {preDelay: fades, delay: fades})]
+        this.fades = [Object.assign({}, fadeDefault, {preDelay: fades, delay: fades})]
       } else if (typeof fades === 'string') {
         // letter trailing multiplier (1 = trail behind by 1 letter)
         fades = parseInt(fades.match(/^[0-9]+/)) || 1
-        fades = [
-          Object.assign(fadeDefault, {
+        this.fades = [
+          Object.assign({}, fadeDefault, {
             preDelay: this.preTypeDelay + this.typeDelay * fades,
             delay: this.typeDelay
           })
         ]
-      } else if (fades instanceof Object) {
-        fades = [Object.assign(fadeDefault, fades)]
-      } else if (fades instanceof Array) {
-        fades = fades.map((fade) => {
-          return Object.assign(fadeDefault, fade)
+      } else if (Array.isArray(fades)) {
+        this.fades = fades.map((fade) => {
+          return Object.assign({}, fadeDefault, fade)
         })
+      } else if (typeof fades === 'object') {
+        this.fades = [Object.assign({}, fadeDefault, fades)]
       }
-      this.fades = fades || []
     },
     resetSpool() {
       this.initFades()
@@ -444,7 +448,7 @@ export default {
     fadeStep(fade) {
       // fade.index is the most recently faded character, or -1
       const index = fade.index + 1
-      if (index < fade.length) {
+      if (index < fade.len) {
         // fade to next character
         fade.index = index
         const fadedChar = this.currentTextArray[index]
@@ -457,7 +461,7 @@ export default {
     },
     fadeStart(fade) {
       fade.index = -1
-      fade.length = this.currentTextLength
+      fade.len = this.currentTextLength
       fade.timeout = setTimeout(() => {
         fade.interval = setInterval(() => this.$nextTick(() => this.fadeStep(fade)), fade.delay)
       }, fade.preDelay)
@@ -544,11 +548,9 @@ export default {
       this.reset()
     },
     currentTextArray() {
-      // console.log('currentTextArray')
       this && this.resetClasses()
     },
     currentTextIndex() {
-      // console.log('currentTextIndex')
       this && this.resetClasses()
     }
   }

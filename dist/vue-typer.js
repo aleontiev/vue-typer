@@ -1,5 +1,5 @@
 /*!
- * vue-typer v1.2.1
+ * vue-typer v1.2.3
  * Copyright 2016-2019 Chris Nguyen
  * Released under the MIT license.
  */
@@ -1299,7 +1299,7 @@ var fadeDefault = {
 };
 
 var fadeObjectValidator = function fadeObjectValidator(value) {
-  return (value.preDelay === undefined || value.preDelay >= 0) && (value.delay === undefined || value.delay >= 0) && (value.key === undefined || !!value.key) && value.timeout === undefined && value.interval === undefined && value.index === undefined;
+  return (value.preDelay === undefined || value.preDelay >= 0) && (value.delay === undefined || value.delay >= 0) && (value.key === undefined || !!value.key) && value.timeout === undefined && value.interval === undefined && value.index === undefined && value.len === undefined;
 };
 
 var fadeValidator = function fadeValidator(value) {
@@ -1309,9 +1309,6 @@ var fadeValidator = function fadeValidator(value) {
   if (typeof value === 'number') {
     return value >= 0;
   }
-  if ((typeof value === 'undefined' ? 'undefined' : (0, _typeof3.default)(value)) === 'object') {
-    return fadeObjectValidator(value);
-  }
   if (typeof value === 'string') {
     return value.match(/^[0-9]+/);
   }
@@ -1319,6 +1316,9 @@ var fadeValidator = function fadeValidator(value) {
     return value.every(function (v) {
       return fadeObjectValidator(v);
     });
+  }
+  if ((typeof value === 'undefined' ? 'undefined' : (0, _typeof3.default)(value)) === 'object') {
+    return fadeObjectValidator(value);
   }
   return false;
 };
@@ -1434,8 +1434,7 @@ exports.default = {
       actionInterval: 0,
       fades: [],
       classes: [],
-      keys: [],
-      show: true
+      keys: []
     };
   },
 
@@ -1502,6 +1501,9 @@ exports.default = {
       this.$watch(['fades', index, 'index'].join('.'), function (newVal, oldVal) {
         _this.resetClasses();
       });
+      this.$watch(['fades', index, 'key'].join('.'), function (newVal, oldVal) {
+        _this.resetClasses();
+      });
     }
   },
   beforeDestroy: function beforeDestroy() {
@@ -1561,25 +1563,26 @@ exports.default = {
     initFades: function initFades() {
       var fades = this.fade;
       if (!fades) {
-        fades = [];
-      } else if (typeof fades === 'boolean') {
-        fades = [(0, _assign2.default)(fadeDefault, {})];
+        this.fades = [];
+        return;
+      }
+      if (typeof fades === 'boolean') {
+        this.fades = [(0, _assign2.default)({}, fadeDefault)];
       } else if (typeof fades === 'number') {
-        fades = [(0, _assign2.default)(fadeDefault, { preDelay: fades, delay: fades })];
+        this.fades = [(0, _assign2.default)({}, fadeDefault, { preDelay: fades, delay: fades })];
       } else if (typeof fades === 'string') {
         fades = parseInt(fades.match(/^[0-9]+/)) || 1;
-        fades = [(0, _assign2.default)(fadeDefault, {
+        this.fades = [(0, _assign2.default)({}, fadeDefault, {
           preDelay: this.preTypeDelay + this.typeDelay * fades,
           delay: this.typeDelay
         })];
-      } else if (fades instanceof Object) {
-        fades = [(0, _assign2.default)(fadeDefault, fades)];
-      } else if (fades instanceof Array) {
-        fades = fades.map(function (fade) {
-          return (0, _assign2.default)(fadeDefault, fade);
+      } else if (Array.isArray(fades)) {
+        this.fades = fades.map(function (fade) {
+          return (0, _assign2.default)({}, fadeDefault, fade);
         });
+      } else if ((typeof fades === 'undefined' ? 'undefined' : (0, _typeof3.default)(fades)) === 'object') {
+        this.fades = [(0, _assign2.default)({}, fadeDefault, fades)];
       }
-      this.fades = fades || [];
     },
     resetSpool: function resetSpool() {
       this.initFades();
@@ -1665,7 +1668,7 @@ exports.default = {
     },
     fadeStep: function fadeStep(fade) {
       var index = fade.index + 1;
-      if (index < fade.length) {
+      if (index < fade.len) {
         fade.index = index;
         var fadedChar = this.currentTextArray[index];
         this.$emit('faded-char', fadedChar, index);
@@ -1678,7 +1681,7 @@ exports.default = {
       var _this4 = this;
 
       fade.index = -1;
-      fade.length = this.currentTextLength;
+      fade.len = this.currentTextLength;
       fade.timeout = setTimeout(function () {
         fade.interval = setInterval(function () {
           return _this4.$nextTick(function () {
@@ -3375,7 +3378,7 @@ module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c
 /***/ (function(module, exports) {
 
 module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c=_vm._self._c||_h;
-  return (_vm.show) ? _c('span', {
+  return _c('span', {
     staticClass: "vue-typer"
   }, [_c('span', {
     staticClass: "left"
@@ -3404,7 +3407,7 @@ module.exports={render:function (){var _vm=this;var _h=_vm.$createElement;var _c
         "val": _vm.currentTextArray[_vm.numLeftChars + r - 1]
       }
     })
-  }), 1)], 1) : _vm._e()
+  }), 1)], 1)
 },staticRenderFns: []}
 
 /***/ }),
