@@ -1,6 +1,6 @@
 {
   "name": "vue-typer",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Vue component that simulates a user typing, selecting, and erasing text.",
   "main": "dist/vue-typer.min.js",
   "files": [
@@ -22,7 +22,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cngu/vue-typer.git"
+    "url": "git+https://github.com/aleontiev/vue-typer.git"
   },
   "keywords": [
     "vue-typer",
