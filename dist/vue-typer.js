@@ -1,5 +1,5 @@
 /*!
- * vue-typer v1.2.3
+ * vue-typer v1.2.4
  * Copyright 2016-2019 Chris Nguyen
  * Released under the MIT license.
  */
@@ -1634,7 +1634,14 @@ exports.default = {
         if (this.isEraseAllStyle) {
           this.moveCaretToStart();
         } else {
-          this.shiftCaret(-1);
+          var shift = 0;
+          var index = this.currentTextIndex - 1;
+          while (this.currentTextArray[index] && this.currentTextArray[index].match(/^\W$/)) {
+            shift += 1;
+            index -= 1;
+          }
+          shift = shift || 1;
+          this.shiftCaret(-1 * shift);
         }
       }
 

@@ -109,15 +109,7 @@ export default {
       shuffle: false,
       initialAction: 'typing',
       typeDelay: 70,
-      fade: [{
-        delay: 70,
-        preDelay: 140,
-        key: 'faded'
-      }, {
-        delay: 70,
-        preDelay: 420,
-        key: 'erased'
-      }],
+      fade: '4',
       preTypeDelay: 70,
       eraseDelay: 250,
       preEraseDelay: 2000,

@@ -416,7 +416,14 @@ export default {
         if (this.isEraseAllStyle) {
           this.moveCaretToStart()
         } else {
-          this.shiftCaret(-1)
+          let shift = 0
+          let index = this.currentTextIndex - 1
+          while (this.currentTextArray[index] && this.currentTextArray[index].match(/^\W$/)) {
+            shift += 1
+            index -= 1
+          }
+          shift = shift || 1
+          this.shiftCaret(-1 * shift)
         }
       }
 
