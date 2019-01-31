@@ -3,15 +3,18 @@
   Ideally we'd just have span.left and span.right contain all the chars to the left and
   right of the caret, but line-wrapping becomes tricky on some browsers (FF/IE/Edge).
   Until we can find a solution for this, we just create one span per character.
-span.vue-typer
+span.vue-typer(v-if='show')
   span.left
-    char.custom.typed(v-for='l in numLeftChars',
-                      :val="currentTextArray[l-1]")
+    char.custom(v-for='l in numLeftChars'
+                :val="currentTextArray[l-1]"
+                :class="classes[l-1]"
+                :key="l-1")
   caret(:class='caretClasses', :animation='caretAnimation')
   span.right
-    char.custom(v-for='r in numRightChars',
-                :val="currentTextArray[numLeftChars + r-1]",
-                :class='rightCharClasses')
+    char.custom(v-for='r in numRightChars'
+                :val="currentTextArray[numLeftChars + r - 1]",
+                :class='classes[numLeftChars + r - 1]'
+                :key="numLeftChars + r - 1")
 </template>
 
 <script>
@@ -33,6 +36,43 @@ const ERASE_STYLE = {
   SELECT_BACK: 'select-back',
   SELECT_ALL: 'select-all',
   CLEAR: 'clear'
+}
+
+const fadeDefault = {
+  preDelay: 70,
+  delay: 70,
+  key: 'faded',
+  index: -1
+}
+
+const fadeObjectValidator = (value) => {
+  return (value.preDelay === undefined || value.preDelay >= 0) &&
+    (value.delay === undefined || value.delay >= 0) &&
+    (value.key === undefined || !!value.key) &&
+    (value.timeout === undefined) &&
+    (value.interval === undefined) &&
+    (value.index === undefined)
+}
+
+const fadeValidator = (value) => {
+  if (typeof value === 'boolean') {
+    return true
+  }
+  if (typeof value === 'number') {
+    return value >= 0
+  }
+  if (typeof value === 'object') {
+    return fadeObjectValidator(value)
+  }
+  if (typeof value === 'string') {
+    return value.match(/^[0-9]+/)
+  }
+  if (Array.isArray(value)) {
+    // todo: check key uniqueness for multiple faders
+    // and possible check against using the standard classes
+    return value.every(v => fadeObjectValidator(v))
+  }
+  return false
 }
 
 export default {
@@ -96,6 +136,20 @@ export default {
       validator: value => value >= 0
     },
     /**
+     * fade: fade configuration
+     * Boolean: if non-falsy, the 'faded' class will be added to elements
+     * Number: "" with fadeDelay = typeDelay and preFadeDelay as given
+     * Object: "" with fadeDelay and preFadeDelay determined by as given
+     * String: "" with fadeDelay and preFadeDelay determined so as to "trail"
+     *    the type by the given number of letters, setting fadeDelay=typeDelay
+     * Array: "" with multiple configurations as given
+     */
+    fade: {
+      type: [Array, Object, Number, Boolean, String],
+      default: false,
+      validator: fadeValidator
+    },
+    /**
      * Milliseconds to wait before performing the first erase action (backspace, highlight, etc.).
      */
     preEraseDelay: {
@@ -149,7 +203,11 @@ export default {
       repeatCounter: 0,
 
       actionTimeout: 0,
-      actionInterval: 0
+      actionInterval: 0,
+      fades: [],
+      classes: [],
+      keys: [],
+      show: true
     }
   },
 
@@ -164,13 +222,6 @@ export default {
         selecting: this.state === STATE.ERASING && this.isSelectionBasedEraseStyle,
         erasing: this.state === STATE.ERASING && !this.isSelectionBasedEraseStyle,
         complete: this.state === STATE.COMPLETE
-      }
-    },
-    rightCharClasses() {
-      return {
-        selected: this.state === STATE.ERASING && this.isSelectionBasedEraseStyle,
-        erased: this.state !== STATE.ERASING ||
-                this.state === STATE.ERASING && !this.isSelectionBasedEraseStyle
       }
     },
     isSelectionBasedEraseStyle() {
@@ -222,7 +273,13 @@ export default {
 
   mounted() {
     this.init()
+    for (let index in this.fades) {
+      this.$watch(['fades', index, 'index'].join('.'), (newVal, oldVal) => {
+        this.resetClasses()
+      })
+    }
   },
+
   beforeDestroy() {
     this.cancelCurrentAction()
   },
@@ -254,9 +311,57 @@ export default {
     },
     reset() {
       this.cancelCurrentAction()
+      this.fadeStop()
       this.init()
     },
+    resetClasses() {
+      this.classes = this.currentTextArray.map((c, i) => {
+        const classes = []
+        if (i < this.currentTextIndex) {
+          classes.push('typed')
+        } else {
+          if (this.state === STATE.ERASING) {
+            classes.push(this.isSelectionBasedEraseStyle ? 'selected' : 'erased')
+          } else {
+            classes.push('untyped')
+          }
+        }
+        this.fades.map((fade) => {
+          if (i <= fade.index) {
+            classes.push(fade.key)
+          }
+        })
+        return classes
+      })
+    },
+    initFades() {
+      let fades = this.fade
+      if (!fades) {
+        fades = []
+      } else if (typeof fades === 'boolean') {
+        fades = [Object.assign(fadeDefault, {})]
+      } else if (typeof fades === 'number') {
+        fades = [Object.assign(fadeDefault, {preDelay: fades, delay: fades})]
+      } else if (typeof fades === 'string') {
+        // letter trailing multiplier (1 = trail behind by 1 letter)
+        fades = parseInt(fades.match(/^[0-9]+/)) || 1
+        fades = [
+          Object.assign(fadeDefault, {
+            preDelay: this.preTypeDelay + this.typeDelay * fades,
+            delay: this.typeDelay
+          })
+        ]
+      } else if (fades instanceof Object) {
+        fades = [Object.assign(fadeDefault, fades)]
+      } else if (fades instanceof Array) {
+        fades = fades.map((fade) => {
+          return Object.assign(fadeDefault, fade)
+        })
+      }
+      this.fades = fades || []
+    },
     resetSpool() {
+      this.initFades()
       this.spoolIndex = 0
       if (this.shuffle && this.spool.length > 1) {
         shuffle(this.spool)
@@ -271,6 +376,7 @@ export default {
         clearTimeout(this.actionTimeout)
         this.actionTimeout = 0
       }
+      // do not cancel fades
     },
     shiftCaret(delta) {
       this.previousTextIndex = this.currentTextIndex
@@ -312,11 +418,13 @@ export default {
 
       if (this.isDoneErasing) {
         this.cancelCurrentAction()
+        // stop fading
         // Ensure every last character is 'erased' in the DOM before proceeding
         this.$nextTick(this.onErased)
       }
     },
     startTyping() {
+      this.fades.map((fade) => this.fadeStart(fade))
       if (this.actionTimeout || this.actionInterval) {
         return
       }
@@ -332,6 +440,40 @@ export default {
           this.actionInterval = setInterval(this.typeStep, this.typeDelay)
         }
       }, this.preTypeDelay)
+    },
+    fadeStep(fade) {
+      // fade.index is the most recently faded character, or -1
+      const index = fade.index + 1
+      if (index < fade.length) {
+        // fade to next character
+        fade.index = index
+        const fadedChar = this.currentTextArray[index]
+        this.$emit('faded-char', fadedChar, index)
+      } else {
+        // fade is done
+        this.fadeStop(fade)
+        this.$emit('faded', fade)
+      }
+    },
+    fadeStart(fade) {
+      fade.index = -1
+      fade.length = this.currentTextLength
+      fade.timeout = setTimeout(() => {
+        fade.interval = setInterval(() => this.$nextTick(() => this.fadeStep(fade)), fade.delay)
+      }, fade.preDelay)
+    },
+    fadeStop(fade) {
+      if (!fade) {
+        return this.fades.map((fade) => this.fadeStop(fade))
+      }
+      if (fade.timeout) {
+        clearTimeout(fade.timeout)
+        fade.timeout = null
+      }
+      if (fade.interval) {
+        clearInterval(fade.interval)
+        fade.interval = null
+      }
     },
     startErasing() {
       if (this.actionTimeout || this.actionInterval) {
@@ -397,6 +539,17 @@ export default {
     },
     shuffle() {
       this.reset()
+    },
+    fade() {
+      this.reset()
+    },
+    currentTextArray() {
+      // console.log('currentTextArray')
+      this && this.resetClasses()
+    },
+    currentTextIndex() {
+      // console.log('currentTextIndex')
+      this && this.resetClasses()
     }
   }
 }

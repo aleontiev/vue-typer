@@ -9,6 +9,7 @@ app-layout.demo
         :repeat='repeat',
         :shuffle='shuffle',
         :initial-action='initialAction',
+        :fade='fade',
         :pre-type-delay='preTypeDelay',
         :type-delay='typeDelay',
         :pre-erase-delay='preEraseDelay',
@@ -32,6 +33,7 @@ app-layout.demo
           :options='["typing", "erasing"]')
 
       #delay-config.col-xs-12.col-lg-6
+        form-input(v-model.text='fade', label='fade', type='text')
         form-input(v-model.number='preTypeDelay', label='preTypeDelay', type='number')
         form-input(v-model.number='typeDelay', label='typeDelay', type='number')
         form-input(v-model.number='preEraseDelay', label='preEraseDelay', type='number')
@@ -108,6 +110,7 @@ export default {
       shuffle: false,
       initialAction: 'typing',
       typeDelay: 70,
+      fade: '2',
       preTypeDelay: 70,
       eraseDelay: 250,
       preEraseDelay: 2000,
@@ -132,6 +135,7 @@ export default {
           :repeat='${this.repeat}'
           :shuffle='${this.shuffle}'
           initial-action='${this.initialAction}'
+          :fade='${this.fade}'
           :pre-type-delay='${this.preTypeDelay}'
           :type-delay='${this.typeDelay}'
           :pre-erase-delay='${this.preEraseDelay}'
@@ -241,7 +245,7 @@ export default {
 
 <style lang='scss'>
 @keyframes rocking {
-  0%, 100% { transform: rotateZ(-10deg); },
+  0%, 100% { transform: rotateZ(-10deg); }
   50%      { transform: rotateZ(10deg); }
 }
 

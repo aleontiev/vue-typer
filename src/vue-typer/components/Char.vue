@@ -49,4 +49,12 @@ export default {
 .erased {
   display: none;
 }
+
+.untyped {
+  display: none;
+}
+
+.faded {
+  opacity: 0.5;
+}
 </style>
