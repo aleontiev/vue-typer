@@ -11,7 +11,6 @@ app-layout.demo
         :initial-action='initialAction',
         :pre-type-delay='preTypeDelay',
         :type-delay='typeDelay',
-        :fade='fade',
         :pre-erase-delay='preEraseDelay',
         :erase-delay='eraseDelay',
         :erase-style='eraseStyle',
@@ -87,6 +86,19 @@ app-layout.demo
       )
     code-block(:code='ghostDemoStyleCode', language='css')
 
+  template(slot='style-showcase-panel-fade')
+    h4.card-title.text-xs-center
+      vue-typer.fade-typer(
+        :text='faderText',
+        :fade='faderFade',
+        :type-delay='faderDelay',
+        :repeat='Infinity',
+        :erase-on-complete='false',
+        :pre-type-delay='0',
+        :pre-erase-delay='2000',
+        erase-style='clear'
+      )
+
   copyright-footer(slot='footer')
 </template>
 
@@ -109,13 +121,15 @@ export default {
       shuffle: false,
       initialAction: 'typing',
       typeDelay: 70,
-      fade: '4',
       preTypeDelay: 70,
       eraseDelay: 250,
       preEraseDelay: 2000,
       eraseStyle: 'select-all',
       eraseOnComplete: false,
-      caretAnimation: 'blink'
+      caretAnimation: 'blink',
+      faderFade: ['1c', '1w', '1ln', '2ln'],
+      faderDelay: 60,
+      faderText: 'the quick brown fox\njumped over\nthe lazy dog'
     }
   },
   computed: {
@@ -304,6 +318,27 @@ main {
     }
     .custom.caret {
       display: none;
+    }
+  }
+  .fade-typer {
+    .custom.char {
+      &.typed {
+        font-size: 2rem;
+        transition: 500ms ease;
+        color: red;
+        &.faded-1c {
+          color: black;
+        }
+        &.faded-1w:not(.faded-1ln) {
+          opacity: 0.5;
+        }
+        &.faded-1ln:not(.faded-2ln) {
+          opacity: 0;
+        }
+        &.faded-2ln {
+          display: none;
+        }
+      }
     }
   }
 }

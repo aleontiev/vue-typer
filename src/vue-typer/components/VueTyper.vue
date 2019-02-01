@@ -17,6 +17,7 @@ span.vue-typer
                 :key="numLeftChars + r - 1")
 </template>
 
+
 <script>
 import Caret from './Caret'
 import Char from './Char'
@@ -31,6 +32,13 @@ const STATE = {
   COMPLETE: 'complete'
 }
 
+const CLASSES = {
+  SELECTED: 'selected',
+  ERASED: 'erased',
+  TYPED: 'typed',
+  UNTYPED: 'untyped'
+}
+
 const ERASE_STYLE = {
   BACKSPACE: 'backspace',
   SELECT_BACK: 'select-back',
@@ -38,23 +46,34 @@ const ERASE_STYLE = {
   CLEAR: 'clear'
 }
 
-const fadeDefault = {
-  preDelay: 70,
-  delay: 70,
-  key: 'faded',
-  index: -1
+const FADE = {
+  CHAR: 'CHAR', // fade out characters at a time
+  WORD: 'WORD', // fade out words at a time
+  LINE: 'LINE' // fade out lines at a time
 }
+
+const FADE_OUT = {
+  FAST: 'FAST',
+  SLOW: 'SLOW', // fade out 1 token at a time
+  NONE: 'NONE' // do not fade at the end
+}
+
+const fadeDefault = {
+  offset: 1,
+  type: FADE.CHAR,
+  key: 'faded',
+  out: FADE_OUT.FAST
+}
+
+const WHITESPACE_REGEX = new RegExp(/^\s+$/)
+const FADE_REGEX = new RegExp(/^([0-9]+)([cwl]{0,1})([sfn]{0,1})$/, 'i')
 
 const fadeObjectValidator = (value) => {
-  return (value.preDelay === undefined || value.preDelay >= 0) &&
-    (value.delay === undefined || value.delay >= 0) &&
-    (value.key === undefined || !!value.key) &&
-    (value.timeout === undefined) &&
-    (value.interval === undefined) &&
-    (value.index === undefined) &&
-    (value.len === undefined)
+  return (typeof value.offset === 'number' && value.offset >= 0) &&
+    (typeof FADE[value.type] !== 'undefined') &&
+    (value.key && typeof value.key === 'string') &&
+    (typeof FADE_OUT[value.out] !== 'undefined')
 }
-
 const fadeValidator = (value) => {
   if (typeof value === 'boolean') {
     return true
@@ -63,17 +82,108 @@ const fadeValidator = (value) => {
     return value >= 0
   }
   if (typeof value === 'string') {
-    return value.match(/^[0-9]+/)
+    return value.match(FADE_REGEX)
   }
   if (Array.isArray(value)) {
     // todo: check key uniqueness for multiple faders
     // and possible check against using the standard classes
-    return value.every(v => fadeObjectValidator(v))
+    return value.every(v => fadeValidator(v))
   }
   if (typeof value === 'object') {
     return fadeObjectValidator(value)
   }
   return false
+}
+const seek = (tokens, text, index, offset, type) => {
+  // look through `text` (starting at `index`) for `offset` # of `type` tokens
+  // return the index of the character of the end of the last observed token, or -1
+  if (index === text.length && offset === 0) {
+    return text.length
+  }
+  if (type === FADE.CHAR) {
+    const diff = index + offset
+    return diff >= 0 ? diff : -1
+  }
+  if (index === text.length) {
+    index -= 1
+  }
+  // for WORD and LINE and non-0 offset,
+  // use a pre-computed token index
+  const direction = offset < 0 ? -1 : 1
+  const {INDEX, TOKENS} = tokens[type]
+  let tokenIndex = INDEX[index]
+  // sanity check: at offset = -1, direction = -1
+  // we take the current token and return the end of it
+  tokenIndex = tokenIndex + offset - 1 * direction
+  const token = TOKENS[tokenIndex]
+  if (typeof token === 'undefined') {
+    return -1
+  }
+  return token[direction < 0 ? 0 : 1]
+}
+const tokenize = (text) => {
+  // build a set of arrays to help deal with each type of token
+  // for words, store the index of the start of each word in an array
+  // for lines, store the index of the start of each line
+
+  // array of (start, end) indices
+  const words = []
+  const lines = []
+  // object of {index: tokenArrayIndex}
+  const wordIndex = []
+  const lineIndex = []
+  const textLength = text.length
+  let wordStart = null
+  let lineStart = null
+  let isNewline = true
+  let isSpace = true
+  for (var index = 0; index < textLength; index++) {
+    const letter = text[index]
+    wordIndex.push(words.length)
+    lineIndex.push(lines.length)
+    if (letter === '\n') {
+      if (lineStart !== null) {
+        lines.push([lineStart, index - 1])
+        lineStart = null
+      }
+      if (wordStart !== null) {
+        words.push([wordStart, index - 1])
+        wordStart = null
+      }
+      isSpace = isNewline = true
+    } else if (letter.match(WHITESPACE_REGEX)) {
+      if (wordStart !== null) {
+        words.push([wordStart, index - 1])
+        wordStart = null
+      }
+      isNewline = false
+      isSpace = true
+    } else {
+      if (isNewline) {
+        lineStart = index
+      }
+      if (isSpace) {
+        wordStart = index
+      }
+      isNewline = isSpace = false
+    }
+  }
+  if (wordStart !== null) {
+    words.push([wordStart, textLength - 1])
+  }
+  if (lineStart !== null) {
+    lines.push([lineStart, textLength - 1])
+  }
+  return {
+    WORD: {
+      TOKENS: words,
+      INDEX: wordIndex
+    },
+    LINE: {
+      TOKENS: lines,
+      INDEX: lineIndex
+    }
+  }
 }
 
 export default {
@@ -206,12 +316,22 @@ export default {
       actionTimeout: 0,
       actionInterval: 0,
       fades: [],
-      classes: [],
-      keys: []
+      fadeOuts: {},
+      fading: null,
+      classes: []
     }
   },
 
   computed: {
+    eraseShift() {
+      let shift = 0
+      let index = this.currentTextIndex - 1
+      while (this.currentTextArray[index] && this.currentTextArray[index].match(/^\W$/)) {
+        shift += 1
+        index -= 1
+      }
+      return shift || 1
+    },
     caretClasses() {
       const idle = this.state === STATE.IDLE
       return {
@@ -256,6 +376,9 @@ export default {
     currentTextArray() {
       return split(this.currentText, '')
     },
+    currentTextTokens() {
+      return tokenize(this.currentTextArray)
+    },
     currentTextLength() {
       // NOTE: Using currentText.length will count each individual codepoint as a
       // separate character, which is likely not what you want. currentTextLength will
@@ -273,14 +396,6 @@ export default {
 
   mounted() {
     this.init()
-    for (let index in this.fades) {
-      this.$watch(['fades', index, 'index'].join('.'), (newVal, oldVal) => {
-        this.resetClasses()
-      })
-      this.$watch(['fades', index, 'key'].join('.'), (newVal, oldVal) => {
-        this.resetClasses()
-      })
-    }
   },
 
   beforeDestroy() {
@@ -289,6 +404,9 @@ export default {
 
   methods: {
     init() {
+      // create this.fades object
+      this.initFades()
+
       // Process the 'text' prop into a typing spool
       if (typeof this.text === 'string') {
         this.spool = [this.text]
@@ -314,23 +432,42 @@ export default {
     },
     reset() {
       this.cancelCurrentAction()
-      this.fadeStop()
       this.init()
     },
     resetClasses() {
-      this.classes = this.currentTextArray.map((c, i) => {
+      const tokens = this.currentTextTokens
+      const text = this.currentTextArray
+      const currentIndex = this.currentTextIndex
+      const fadeIndex = {}
+      const fadeOuts = this.fadeOuts
+      this.fades.map((fade) => {
+        // loop over each fade and determine the
+        // new fade index
+        const {offset, type} = fade
+        const fadeOut = fadeOuts[fade.key]
+        const off = typeof fadeOut === 'undefined' ? offset : fadeOut
+        const index = seek(tokens, text, currentIndex, -1 * off, type)
+        fadeIndex[fade.key] = index
+      })
+      this.classes = text.map((c, i) => {
+        // loop over each character and add the basic classes:
+        // TYPED: a character is to the left of the cursor
+        // UNTYPED: a character is to the right of the cursor
+        // SELECTED: a character is selected to be erased
+        // ERASED: a character is erased
         const classes = []
-        if (i < this.currentTextIndex) {
-          classes.push('typed')
+        if (i < currentIndex) {
+          classes.push(CLASSES.TYPED)
         } else {
           if (this.state === STATE.ERASING) {
-            classes.push(this.isSelectionBasedEraseStyle ? 'selected' : 'erased')
+            classes.push(this.isSelectionBasedEraseStyle ? CLASSES.SELECTED : CLASSES.ERASED)
           } else {
-            classes.push('untyped')
+            classes.push(CLASSES.UNTYPED)
           }
         }
+        // loop over each fade and add in fader classes
         this.fades.map((fade) => {
-          if (i <= fade.index) {
+          if (i < fadeIndex[fade.key]) {
             classes.push(fade.key)
           }
         })
@@ -340,32 +477,51 @@ export default {
     initFades() {
       let fades = this.fade
       if (!fades) {
+        // no fades
         this.fades = []
         return
       }
-      if (typeof fades === 'boolean') {
-        this.fades = [Object.assign({}, fadeDefault)]
-      } else if (typeof fades === 'number') {
-        this.fades = [Object.assign({}, fadeDefault, {preDelay: fades, delay: fades})]
-      } else if (typeof fades === 'string') {
-        // letter trailing multiplier (1 = trail behind by 1 letter)
-        fades = parseInt(fades.match(/^[0-9]+/)) || 1
-        this.fades = [
-          Object.assign({}, fadeDefault, {
-            preDelay: this.preTypeDelay + this.typeDelay * fades,
-            delay: this.typeDelay
-          })
-        ]
-      } else if (Array.isArray(fades)) {
+      if (Array.isArray(fades)) {
+        // many fades
         this.fades = fades.map((fade) => {
-          return Object.assign({}, fadeDefault, fade)
+          return this.initFade(fade)
         })
-      } else if (typeof fades === 'object') {
-        this.fades = [Object.assign({}, fadeDefault, fades)]
+      } else {
+        // one fade
+        return [this.initFade(fades)]
       }
     },
+    initFade(fade) {
+      if (typeof fade === 'boolean') {
+        return Object.assign({}, fadeDefault)
+      }
+      if (typeof fade === 'number') {
+        // offset
+        return Object.assign({}, fadeDefault, {offset: fade})
+      }
+      if (typeof fade === 'string') {
+        // encoded, e.g. "1WS" for 1-word-slow
+        const key = 'faded-' + fade
+        const matches = fade.match(FADE_REGEX)
+        const offset = matches[1].toLowerCase()
+        let type = matches[2].toLowerCase()
+        let out = matches[3].toLowerCase()
+        type = type === 'l' ? FADE.LINE : (
+          type === 'w' ? FADE.WORD : FADE.CHAR
+        )
+        out = out === 'f' ? FADE_OUT.FAST : (
+          out === 'n' ? FADE_OUT.NONE : FADE_OUT.SLOW
+        )
+        return Object.assign({}, fadeDefault, {
+          offset: offset,
+          type: type,
+          key: key,
+          out: out
+        })
+      }
+      return Object.assign({}, fadeDefault, fade)
+    },
     resetSpool() {
-      this.initFades()
       this.spoolIndex = 0
       if (this.shuffle && this.spool.length > 1) {
         shuffle(this.spool)
@@ -380,7 +536,6 @@ export default {
         clearTimeout(this.actionTimeout)
         this.actionTimeout = 0
       }
-      // do not cancel fades
     },
     shiftCaret(delta) {
       this.previousTextIndex = this.currentTextIndex
@@ -405,10 +560,44 @@ export default {
       }
 
       if (this.isDoneTyping) {
-        this.cancelCurrentAction()
-        // Ensure the last typed character is rendered before proceeding
-        // Note that $nextTick is not required after typing the previous characters due to setInterval
-        this.$nextTick(this.onTyped)
+        this.maybeFadeOut(() => {
+          this.cancelCurrentAction()
+          this.$nextTick(this.onTyped)
+        })
+      }
+    },
+    maybeFadeOut(callback) {
+      const fading = this.fading
+      if (fading === null) {
+        this.fadeOuts = {}
+        this.fades.map((fade) => {
+          if (fade.out === FADE_OUT.SLOW) {
+            this.fadeOuts[fade.key] = fade.offset
+            this.fading = true
+          } else if (fade.out === FADE_OUT.FAST) {
+            this.fadeOuts[fade.key] = 0
+            this.fading = true
+          } else if (fade.out === FADE_OUT.NONE) {
+            // do not fade this
+          }
+        })
+      }
+      if (this.fading) {
+        const faded = Object.keys(this.fadeOuts).every((key) => {
+          return this.fadeOuts[key] <= 0
+        })
+        if (faded) {
+          this.fading = false
+        } else {
+          // update fadeOuts
+          Object.keys(this.fadeOuts).forEach((key) => {
+            this.fadeOuts[key] = Math.max(this.fadeOuts[key] - 1, 0)
+          })
+        }
+        this.resetClasses()
+      }
+      if (this.fading === false) {
+        callback()
       }
     },
     eraseStep() {
@@ -416,26 +605,17 @@ export default {
         if (this.isEraseAllStyle) {
           this.moveCaretToStart()
         } else {
-          let shift = 0
-          let index = this.currentTextIndex - 1
-          while (this.currentTextArray[index] && this.currentTextArray[index].match(/^\W$/)) {
-            shift += 1
-            index -= 1
-          }
-          shift = shift || 1
-          this.shiftCaret(-1 * shift)
+          this.shiftCaret(-1 * this.eraseShift)
         }
       }
 
       if (this.isDoneErasing) {
         this.cancelCurrentAction()
-        // stop fading
         // Ensure every last character is 'erased' in the DOM before proceeding
         this.$nextTick(this.onErased)
       }
     },
     startTyping() {
-      this.fades.map((fade) => this.fadeStart(fade))
       if (this.actionTimeout || this.actionInterval) {
         return
       }
@@ -451,40 +631,6 @@ export default {
           this.actionInterval = setInterval(this.typeStep, this.typeDelay)
         }
       }, this.preTypeDelay)
-    },
-    fadeStep(fade) {
-      // fade.index is the most recently faded character, or -1
-      const index = fade.index + 1
-      if (index < fade.len) {
-        // fade to next character
-        fade.index = index
-        const fadedChar = this.currentTextArray[index]
-        this.$emit('faded-char', fadedChar, index)
-      } else {
-        // fade is done
-        this.fadeStop(fade)
-        this.$emit('faded', fade)
-      }
-    },
-    fadeStart(fade) {
-      fade.index = -1
-      fade.len = this.currentTextLength
-      fade.timeout = setTimeout(() => {
-        fade.interval = setInterval(() => this.$nextTick(() => this.fadeStep(fade)), fade.delay)
-      }, fade.preDelay)
-    },
-    fadeStop(fade) {
-      if (!fade) {
-        return this.fades.map((fade) => this.fadeStop(fade))
-      }
-      if (fade.timeout) {
-        clearTimeout(fade.timeout)
-        fade.timeout = null
-      }
-      if (fade.interval) {
-        clearInterval(fade.interval)
-        fade.interval = null
-      }
     },
     startErasing() {
       if (this.actionTimeout || this.actionInterval) {
@@ -519,6 +665,8 @@ export default {
     onErased() {
       this.$emit('erased', this.currentText)
 
+      this.fading = null
+      this.fadeOuts = {}
       if (this.onLastWord) {
         if (this.shouldRepeat) {
           this.repeatCounter++
@@ -549,9 +697,6 @@ export default {
       this.reset()
     },
     shuffle() {
-      this.reset()
-    },
-    fade() {
       this.reset()
     },
     currentTextArray() {

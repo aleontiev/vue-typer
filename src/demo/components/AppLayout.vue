@@ -29,6 +29,13 @@
           .card.col-xs-12.col-lg-4
             slot(name='style-showcase-panel-3')
 
+    section#fade-showcase.row
+      h4.col-xs-12.text-xs-center VueTyper fade effect
+      .col-xs
+        .row
+          .card.col-xs-12.col-lg-12
+            slot(name='style-showcase-panel-fade')
+
   slot(name='footer')
 </template>
 
@@ -44,7 +51,12 @@ $section-vertical-spacer: 4rem;
     #playground {
       margin-bottom: $section-vertical-spacer;
     }
-
+    #fade-showcase {
+      margin-top: $section-vertical-spacer;
+      .card {
+        min-height: 150px;
+      }
+    }
     h4 {
       height: 1.1em;
       margin-bottom: 1em;
