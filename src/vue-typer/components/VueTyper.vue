@@ -66,7 +66,7 @@ const fadeDefault = {
 }
 
 const WHITESPACE_REGEX = new RegExp(/^\s+$/)
-const FADE_REGEX = new RegExp(/^([0-9]+)([cwl]{0,1})([sfn]{0,1})$/, 'i')
+const FADE_REGEX = new RegExp(/^([0-9]+)([cwl]{0,1})([sfn]{0,1})$/i)
 
 const fadeObjectValidator = (value) => {
   return (typeof value.offset === 'number' && value.offset >= 0) &&
@@ -567,8 +567,7 @@ export default {
       }
     },
     maybeFadeOut(callback) {
-      const fading = this.fading
-      if (fading === null) {
+      if (this.fade && this.fading === null) {
         this.fadeOuts = {}
         this.fades.map((fade) => {
           if (fade.out === FADE_OUT.SLOW) {
@@ -596,7 +595,7 @@ export default {
         }
         this.resetClasses()
       }
-      if (this.fading === false) {
+      if (!this.fade || this.fading === false) {
         callback()
       }
     },

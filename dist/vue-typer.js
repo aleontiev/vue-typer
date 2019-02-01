@@ -1,5 +1,5 @@
 /*!
- * vue-typer v1.2.4
+ * vue-typer v1.2.5
  * Copyright 2016-2019 Chris Nguyen
  * Released under the MIT license.
  */
@@ -1284,6 +1284,13 @@ var STATE = {
   COMPLETE: 'complete'
 };
 
+var CLASSES = {
+  SELECTED: 'selected',
+  ERASED: 'erased',
+  TYPED: 'typed',
+  UNTYPED: 'untyped'
+};
+
 var ERASE_STYLE = {
   BACKSPACE: 'backspace',
   SELECT_BACK: 'select-back',
@@ -1291,17 +1298,29 @@ var ERASE_STYLE = {
   CLEAR: 'clear'
 };
 
+var FADE = {
+  CHAR: 'CHAR',
+  WORD: 'WORD',
+  LINE: 'LINE' };
+
+var FADE_OUT = {
+  FAST: 'FAST',
+  SLOW: 'SLOW',
+  NONE: 'NONE' };
+
 var fadeDefault = {
-  preDelay: 70,
-  delay: 70,
+  offset: 1,
+  type: FADE.CHAR,
   key: 'faded',
-  index: -1
+  out: FADE_OUT.FAST
 };
+
+var WHITESPACE_REGEX = new RegExp(/^\s+$/);
+var FADE_REGEX = new RegExp(/^([0-9]+)([cwl]{0,1})([sfn]{0,1})$/i);
 
 var fadeObjectValidator = function fadeObjectValidator(value) {
-  return (value.preDelay === undefined || value.preDelay >= 0) && (value.delay === undefined || value.delay >= 0) && (value.key === undefined || !!value.key) && value.timeout === undefined && value.interval === undefined && value.index === undefined && value.len === undefined;
+  return typeof value.offset === 'number' && value.offset >= 0 && typeof FADE[value.type] !== 'undefined' && value.key && typeof value.key === 'string' && typeof FADE_OUT[value.out] !== 'undefined';
 };
-
 var fadeValidator = function fadeValidator(value) {
   if (typeof value === 'boolean') {
     return true;
@@ -1310,17 +1329,102 @@ var fadeValidator = function fadeValidator(value) {
     return value >= 0;
   }
   if (typeof value === 'string') {
-    return value.match(/^[0-9]+/);
+    return value.match(FADE_REGEX);
   }
   if (Array.isArray(value)) {
     return value.every(function (v) {
-      return fadeObjectValidator(v);
+      return fadeValidator(v);
     });
   }
   if ((typeof value === 'undefined' ? 'undefined' : (0, _typeof3.default)(value)) === 'object') {
     return fadeObjectValidator(value);
   }
   return false;
+};
+var seek = function seek(tokens, text, index, offset, type) {
+  if (index === text.length && offset === 0) {
+    return text.length;
+  }
+  if (type === FADE.CHAR) {
+    var diff = index + offset;
+    return diff >= 0 ? diff : -1;
+  }
+  if (index === text.length) {
+    index -= 1;
+  }
+
+  var direction = offset < 0 ? -1 : 1;
+  var _tokens$type = tokens[type],
+      INDEX = _tokens$type.INDEX,
+      TOKENS = _tokens$type.TOKENS;
+
+  var tokenIndex = INDEX[index];
+
+  tokenIndex = tokenIndex + offset - 1 * direction;
+  var token = TOKENS[tokenIndex];
+  if (typeof token === 'undefined') {
+    return -1;
+  }
+  return token[direction < 0 ? 0 : 1];
+};
+var tokenize = function tokenize(text) {
+  var words = [];
+  var lines = [];
+
+  var wordIndex = [];
+  var lineIndex = [];
+  var textLength = text.length;
+  var wordStart = null;
+  var lineStart = null;
+  var isNewline = true;
+  var isSpace = true;
+  for (var index = 0; index < textLength; index++) {
+    var letter = text[index];
+    wordIndex.push(words.length);
+    lineIndex.push(lines.length);
+    if (letter === '\n') {
+      if (lineStart !== null) {
+        lines.push([lineStart, index - 1]);
+        lineStart = null;
+      }
+      if (wordStart !== null) {
+        words.push([wordStart, index - 1]);
+        wordStart = null;
+      }
+      isSpace = isNewline = true;
+    } else if (letter.match(WHITESPACE_REGEX)) {
+      if (wordStart !== null) {
+        words.push([wordStart, index - 1]);
+        wordStart = null;
+      }
+      isNewline = false;
+      isSpace = true;
+    } else {
+      if (isNewline) {
+        lineStart = index;
+      }
+      if (isSpace) {
+        wordStart = index;
+      }
+      isNewline = isSpace = false;
+    }
+  }
+  if (wordStart !== null) {
+    words.push([wordStart, textLength - 1]);
+  }
+  if (lineStart !== null) {
+    lines.push([lineStart, textLength - 1]);
+  }
+  return {
+    WORD: {
+      TOKENS: words,
+      INDEX: wordIndex
+    },
+    LINE: {
+      TOKENS: lines,
+      INDEX: lineIndex
+    }
+  };
 };
 
 exports.default = {
@@ -1433,13 +1537,23 @@ exports.default = {
       actionTimeout: 0,
       actionInterval: 0,
       fades: [],
-      classes: [],
-      keys: []
+      fadeOuts: {},
+      fading: null,
+      classes: []
     };
   },
 
 
   computed: {
+    eraseShift: function eraseShift() {
+      var shift = 0;
+      var index = this.currentTextIndex - 1;
+      while (this.currentTextArray[index] && this.currentTextArray[index].match(/^\W$/)) {
+        shift += 1;
+        index -= 1;
+      }
+      return shift || 1;
+    },
     caretClasses: function caretClasses() {
       var idle = this.state === STATE.IDLE;
       return {
@@ -1482,6 +1596,9 @@ exports.default = {
     currentTextArray: function currentTextArray() {
       return (0, _lodash2.default)(this.currentText, '');
     },
+    currentTextTokens: function currentTextTokens() {
+      return tokenize(this.currentTextArray);
+    },
     currentTextLength: function currentTextLength() {
       return this.currentTextArray.length;
     },
@@ -1494,17 +1611,7 @@ exports.default = {
   },
 
   mounted: function mounted() {
-    var _this = this;
-
     this.init();
-    for (var index in this.fades) {
-      this.$watch(['fades', index, 'index'].join('.'), function (newVal, oldVal) {
-        _this.resetClasses();
-      });
-      this.$watch(['fades', index, 'key'].join('.'), function (newVal, oldVal) {
-        _this.resetClasses();
-      });
-    }
   },
   beforeDestroy: function beforeDestroy() {
     this.cancelCurrentAction();
@@ -1513,6 +1620,8 @@ exports.default = {
 
   methods: {
     init: function init() {
+      this.initFades();
+
       if (typeof this.text === 'string') {
         this.spool = [this.text];
       } else {
@@ -1535,25 +1644,39 @@ exports.default = {
     },
     reset: function reset() {
       this.cancelCurrentAction();
-      this.fadeStop();
       this.init();
     },
     resetClasses: function resetClasses() {
-      var _this2 = this;
+      var _this = this;
 
-      this.classes = this.currentTextArray.map(function (c, i) {
+      var tokens = this.currentTextTokens;
+      var text = this.currentTextArray;
+      var currentIndex = this.currentTextIndex;
+      var fadeIndex = {};
+      var fadeOuts = this.fadeOuts;
+      this.fades.map(function (fade) {
+        var offset = fade.offset,
+            type = fade.type;
+
+        var fadeOut = fadeOuts[fade.key];
+        var off = typeof fadeOut === 'undefined' ? offset : fadeOut;
+        var index = seek(tokens, text, currentIndex, -1 * off, type);
+        fadeIndex[fade.key] = index;
+      });
+      this.classes = text.map(function (c, i) {
         var classes = [];
-        if (i < _this2.currentTextIndex) {
-          classes.push('typed');
+        if (i < currentIndex) {
+          classes.push(CLASSES.TYPED);
         } else {
-          if (_this2.state === STATE.ERASING) {
-            classes.push(_this2.isSelectionBasedEraseStyle ? 'selected' : 'erased');
+          if (_this.state === STATE.ERASING) {
+            classes.push(_this.isSelectionBasedEraseStyle ? CLASSES.SELECTED : CLASSES.ERASED);
           } else {
-            classes.push('untyped');
+            classes.push(CLASSES.UNTYPED);
           }
         }
-        _this2.fades.map(function (fade) {
-          if (i <= fade.index) {
+
+        _this.fades.map(function (fade) {
+          if (i < fadeIndex[fade.key]) {
             classes.push(fade.key);
           }
         });
@@ -1561,31 +1684,46 @@ exports.default = {
       });
     },
     initFades: function initFades() {
+      var _this2 = this;
+
       var fades = this.fade;
       if (!fades) {
         this.fades = [];
         return;
       }
-      if (typeof fades === 'boolean') {
-        this.fades = [(0, _assign2.default)({}, fadeDefault)];
-      } else if (typeof fades === 'number') {
-        this.fades = [(0, _assign2.default)({}, fadeDefault, { preDelay: fades, delay: fades })];
-      } else if (typeof fades === 'string') {
-        fades = parseInt(fades.match(/^[0-9]+/)) || 1;
-        this.fades = [(0, _assign2.default)({}, fadeDefault, {
-          preDelay: this.preTypeDelay + this.typeDelay * fades,
-          delay: this.typeDelay
-        })];
-      } else if (Array.isArray(fades)) {
+      if (Array.isArray(fades)) {
         this.fades = fades.map(function (fade) {
-          return (0, _assign2.default)({}, fadeDefault, fade);
+          return _this2.initFade(fade);
         });
-      } else if ((typeof fades === 'undefined' ? 'undefined' : (0, _typeof3.default)(fades)) === 'object') {
-        this.fades = [(0, _assign2.default)({}, fadeDefault, fades)];
+      } else {
+        return [this.initFade(fades)];
       }
     },
+    initFade: function initFade(fade) {
+      if (typeof fade === 'boolean') {
+        return (0, _assign2.default)({}, fadeDefault);
+      }
+      if (typeof fade === 'number') {
+        return (0, _assign2.default)({}, fadeDefault, { offset: fade });
+      }
+      if (typeof fade === 'string') {
+        var key = 'faded-' + fade;
+        var matches = fade.match(FADE_REGEX);
+        var offset = matches[1].toLowerCase();
+        var type = matches[2].toLowerCase();
+        var out = matches[3].toLowerCase();
+        type = type === 'l' ? FADE.LINE : type === 'w' ? FADE.WORD : FADE.CHAR;
+        out = out === 'f' ? FADE_OUT.FAST : out === 'n' ? FADE_OUT.NONE : FADE_OUT.SLOW;
+        return (0, _assign2.default)({}, fadeDefault, {
+          offset: offset,
+          type: type,
+          key: key,
+          out: out
+        });
+      }
+      return (0, _assign2.default)({}, fadeDefault, fade);
+    },
     resetSpool: function resetSpool() {
-      this.initFades();
       this.spoolIndex = 0;
       if (this.shuffle && this.spool.length > 1) {
         (0, _shuffle2.default)(this.spool);
@@ -1615,6 +1753,8 @@ exports.default = {
       this.currentTextIndex = this.currentTextLength;
     },
     typeStep: function typeStep() {
+      var _this3 = this;
+
       if (!this.isDoneTyping) {
         this.shiftCaret(1);
 
@@ -1624,9 +1764,42 @@ exports.default = {
       }
 
       if (this.isDoneTyping) {
-        this.cancelCurrentAction();
+        this.maybeFadeOut(function () {
+          _this3.cancelCurrentAction();
+          _this3.$nextTick(_this3.onTyped);
+        });
+      }
+    },
+    maybeFadeOut: function maybeFadeOut(callback) {
+      var _this4 = this;
 
-        this.$nextTick(this.onTyped);
+      if (this.fade && this.fading === null) {
+        this.fadeOuts = {};
+        this.fades.map(function (fade) {
+          if (fade.out === FADE_OUT.SLOW) {
+            _this4.fadeOuts[fade.key] = fade.offset;
+            _this4.fading = true;
+          } else if (fade.out === FADE_OUT.FAST) {
+            _this4.fadeOuts[fade.key] = 0;
+            _this4.fading = true;
+          } else if (fade.out === FADE_OUT.NONE) {}
+        });
+      }
+      if (this.fading) {
+        var faded = (0, _keys2.default)(this.fadeOuts).every(function (key) {
+          return _this4.fadeOuts[key] <= 0;
+        });
+        if (faded) {
+          this.fading = false;
+        } else {
+          (0, _keys2.default)(this.fadeOuts).forEach(function (key) {
+            _this4.fadeOuts[key] = Math.max(_this4.fadeOuts[key] - 1, 0);
+          });
+        }
+        this.resetClasses();
+      }
+      if (!this.fade || this.fading === false) {
+        callback();
       }
     },
     eraseStep: function eraseStep() {
@@ -1634,14 +1807,7 @@ exports.default = {
         if (this.isEraseAllStyle) {
           this.moveCaretToStart();
         } else {
-          var shift = 0;
-          var index = this.currentTextIndex - 1;
-          while (this.currentTextArray[index] && this.currentTextArray[index].match(/^\W$/)) {
-            shift += 1;
-            index -= 1;
-          }
-          shift = shift || 1;
-          this.shiftCaret(-1 * shift);
+          this.shiftCaret(-1 * this.eraseShift);
         }
       }
 
@@ -1652,11 +1818,8 @@ exports.default = {
       }
     },
     startTyping: function startTyping() {
-      var _this3 = this;
+      var _this5 = this;
 
-      this.fades.map(function (fade) {
-        return _this3.fadeStart(fade);
-      });
       if (this.actionTimeout || this.actionInterval) {
         return;
       }
@@ -1666,53 +1829,12 @@ exports.default = {
       this.state = STATE.IDLE;
       this.nextState = STATE.TYPING;
       this.actionTimeout = setTimeout(function () {
-        _this3.state = STATE.TYPING;
-        _this3.typeStep();
-        if (!_this3.isDoneTyping) {
-          _this3.actionInterval = setInterval(_this3.typeStep, _this3.typeDelay);
+        _this5.state = STATE.TYPING;
+        _this5.typeStep();
+        if (!_this5.isDoneTyping) {
+          _this5.actionInterval = setInterval(_this5.typeStep, _this5.typeDelay);
         }
       }, this.preTypeDelay);
-    },
-    fadeStep: function fadeStep(fade) {
-      var index = fade.index + 1;
-      if (index < fade.len) {
-        fade.index = index;
-        var fadedChar = this.currentTextArray[index];
-        this.$emit('faded-char', fadedChar, index);
-      } else {
-        this.fadeStop(fade);
-        this.$emit('faded', fade);
-      }
-    },
-    fadeStart: function fadeStart(fade) {
-      var _this4 = this;
-
-      fade.index = -1;
-      fade.len = this.currentTextLength;
-      fade.timeout = setTimeout(function () {
-        fade.interval = setInterval(function () {
-          return _this4.$nextTick(function () {
-            return _this4.fadeStep(fade);
-          });
-        }, fade.delay);
-      }, fade.preDelay);
-    },
-    fadeStop: function fadeStop(fade) {
-      var _this5 = this;
-
-      if (!fade) {
-        return this.fades.map(function (fade) {
-          return _this5.fadeStop(fade);
-        });
-      }
-      if (fade.timeout) {
-        clearTimeout(fade.timeout);
-        fade.timeout = null;
-      }
-      if (fade.interval) {
-        clearInterval(fade.interval);
-        fade.interval = null;
-      }
     },
     startErasing: function startErasing() {
       var _this6 = this;
@@ -1749,6 +1871,8 @@ exports.default = {
     onErased: function onErased() {
       this.$emit('erased', this.currentText);
 
+      this.fading = null;
+      this.fadeOuts = {};
       if (this.onLastWord) {
         if (this.shouldRepeat) {
           this.repeatCounter++;
@@ -1779,9 +1903,6 @@ exports.default = {
       this.reset();
     },
     shuffle: function shuffle() {
-      this.reset();
-    },
-    fade: function fade() {
       this.reset();
     },
     currentTextArray: function currentTextArray() {
